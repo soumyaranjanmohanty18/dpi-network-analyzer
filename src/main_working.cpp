@@ -38,7 +38,7 @@ public:
     {
         uint32_t addr = parseIP(ip);
         blocked_ips.insert(addr);
-        std::cout << "[Rules] Blocked IP: " << ip << "\n";
+        // std::cout << "[Rules] Blocked IP: " << ip << "\n";
     }
 
     void blockApp(const std::string &app)
@@ -48,17 +48,17 @@ public:
             if (appTypeToString(static_cast<AppType>(i)) == app)
             {
                 blocked_apps.insert(static_cast<AppType>(i));
-                std::cout << "[Rules] Blocked app: " << app << "\n";
+                // std::cout << "[Rules] Blocked app: " << app << "\n";
                 return;
             }
         }
-        std::cerr << "[Rules] Unknown app: " << app << "\n";
+        // ignore silently or handle later
     }
 
     void blockDomain(const std::string &domain)
     {
         blocked_domains.push_back(domain);
-        std::cout << "[Rules] Blocked domain: " << domain << "\n";
+        // std::cout << "[Rules] Blocked domain: " << domain << "\n";
     }
 
     bool isBlocked(uint32_t src_ip, AppType app, const std::string &sni) const
@@ -145,11 +145,6 @@ int main(int argc, char *argv[])
         }
     }
 
-    std::cout << "\n";
-    std::cout << "╔══════════════════════════════════════════════════════════════╗\n";
-    std::cout << "║                    DPI ENGINE v1.0                            ║\n";
-    std::cout << "╚══════════════════════════════════════════════════════════════╝\n\n";
-
     // Open input
     PcapReader reader;
     if (!reader.open(input_file))
@@ -181,12 +176,10 @@ int main(int argc, char *argv[])
     RawPacket raw;
     ParsedPacket parsed;
 
-    std::cout << "[DPI] Processing packets...\n";
     int count = 0;
     while (reader.readNextPacket(raw))
     {
         count++;
-        std::cout << "Packet: " << count << std::endl;
 
         if (count > 1000)
             break; // safety break
@@ -309,14 +302,6 @@ int main(int argc, char *argv[])
         if (!flow.blocked)
         {
             flow.blocked = rules.isBlocked(tuple.src_ip, flow.app_type, flow.sni);
-            if (flow.blocked)
-            {
-                std::cout << "[BLOCKED] " << parsed.src_ip << " -> " << parsed.dest_ip
-                          << " (" << appTypeToString(flow.app_type);
-                if (!flow.sni.empty())
-                    std::cout << ": " << flow.sni;
-                std::cout << ")\n";
-            }
         }
 
         // Update app stats
@@ -344,55 +329,27 @@ int main(int argc, char *argv[])
     reader.close();
     output.close();
 
-    // Print report
-    std::cout << "\n";
-    std::cout << "╔══════════════════════════════════════════════════════════════╗\n";
-    std::cout << "║                      PROCESSING REPORT                       ║\n";
-    std::cout << "╠══════════════════════════════════════════════════════════════╣\n";
-    std::cout << "║ Total Packets:      " << std::setw(10) << total_packets << "                             ║\n";
-    std::cout << "║ Forwarded:          " << std::setw(10) << forwarded << "                             ║\n";
-    std::cout << "║ Dropped:            " << std::setw(10) << dropped << "                             ║\n";
-    std::cout << "║ Active Flows:       " << std::setw(10) << flows.size() << "                             ║\n";
-    std::cout << "╠══════════════════════════════════════════════════════════════╣\n";
-    std::cout << "║                    APPLICATION BREAKDOWN                     ║\n";
-    std::cout << "╠══════════════════════════════════════════════════════════════╣\n";
+    std::cout << "{\n";
+    std::cout << "  \"totalPackets\": " << total_packets << ",\n";
+    std::cout << "  \"forwarded\": " << forwarded << ",\n";
+    std::cout << "  \"dropped\": " << dropped << ",\n";
 
-    // Sort by count
-    std::vector<std::pair<AppType, uint64_t>> sorted_apps(app_stats.begin(), app_stats.end());
-    std::sort(sorted_apps.begin(), sorted_apps.end(),
-              [](const auto &a, const auto &b)
-              { return a.second > b.second; });
+    std::cout << "  \"activeFlows\": " << flows.size() << ",\n";
 
-    for (const auto &[app, count] : sorted_apps)
+    std::cout << "  \"applications\": {\n";
+
+    int i = 0;
+    for (const auto &[app, count] : app_stats)
     {
-        double pct = 100.0 * count / total_packets;
-        int bar_len = static_cast<int>(pct / 5);
-        std::string bar(bar_len, '#');
-
-        std::cout << "║ " << std::setw(15) << std::left << appTypeToString(app)
-                  << std::setw(8) << std::right << count
-                  << " " << std::setw(5) << std::fixed << std::setprecision(1) << pct << "% "
-                  << std::setw(20) << std::left << bar << "  ║\n";
+        std::cout << "    \"" << appTypeToString(app) << "\": " << count;
+        if (i < app_stats.size() - 1)
+            std::cout << ",";
+        std::cout << "\n";
+        i++;
     }
 
-    std::cout << "╚══════════════════════════════════════════════════════════════╝\n";
-
-    // List unique SNIs
-    std::cout << "\n[Detected Applications/Domains]\n";
-    std::unordered_map<std::string, AppType> unique_snis;
-    for (const auto &[tuple, flow] : flows)
-    {
-        if (!flow.sni.empty())
-        {
-            unique_snis[flow.sni] = flow.app_type;
-        }
-    }
-    for (const auto &[sni, app] : unique_snis)
-    {
-        std::cout << "  - " << sni << " -> " << appTypeToString(app) << "\n";
-    }
-
-    std::cout << "\nOutput written to: " << output_file << "\n";
+    std::cout << "  }\n";
+    std::cout << "}\n";
 
     return 0;
 }
